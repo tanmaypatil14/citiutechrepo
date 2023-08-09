@@ -1,0 +1,598 @@
+package TransplantTransplant_Pub_Reggie;
+
+
+import com.dva.funcs.DVAFunctions;
+import com.stc.util.STCTypeConverter;
+import com.dva.constants.DVAConstants;
+import com.dva.errors.DVAErrors;
+import com.dva.property.DVAProperty;
+import com.dva.audit.DVAAudit;
+import com.dva.control.DVAControl;
+import com.dva.errors.ErrorProperties;
+import java.net.InetAddress;
+import java.util.Date;
+import java.text.*;
+import com.davita.www.*;
+import com.dva.webservice.*;
+
+
+public class jcdTransplant_Pub_Reggie
+{
+
+    /*
+      ************************************************************************************
+      *
+      *   Name    :  jcdTransplant_Pub_Reggie
+      *
+      *
+      *   Version History
+      *
+      *   Version Developer        Date             Changes
+      *   -----------------------------------------------------------------------------------
+      *   1.0.0.0 Yibo Zhang       11/05/2015       Initial Version
+      ************************************************************************************************
+      *
+      .
+     */
+    String sProjectName = "Transplant_Pub_Reggie";
+
+    String sComponentName = "Transplant";
+
+    String sComponentVer = "_P_1";
+
+    int recordCountReceived = 0;
+
+    int recordCountProcessed = 0;
+
+    int recordCountProcessedafterJMS = 0;
+
+    public com.stc.codegen.logger.Logger logger;
+
+    public com.stc.codegen.alerter.Alerter alerter;
+
+    public com.stc.codegen.util.CollaborationContext collabContext;
+
+    public com.stc.codegen.util.TypeConverter typeConverter;
+
+    static String sTopic = "topTransplant";
+
+    static String sDomain = System.getProperty( "com.sun.aas.instanceRoot" );
+
+    static String hostName;
+
+    static String hostAddress;
+
+    static String sSendDataRunName = "SendDataRun_Transplant_Pub_Reggie";
+
+    String sSendDataToRun = "N";
+
+    Date dtLastChecked = null;
+
+    Control_WS control_ws;
+
+    Run_Post_WS run_post_ws;
+
+    Error_WS error_ws;
+
+    ReprocessPub_WS reprocesspub_ws;
+
+    InetAddress thisIp;
+
+    public void start( com.stc.schedulerotd.appconn.scheduler.FileTextMessage input, otdREG_Transplant_SQL.OtdREG_Transplant_SQLOTD otdREG_Transplant_SQL_1, xsd.PatientTransplant_898367981.PatientTransplant_ PatientTransplant_PatientTransplant_1, com.stc.connectors.jms.JMS JMS_1 )
+        throws Throwable
+    {
+        try {
+            RUN runPubMain = new RUN( "PUB_MAIN" );
+            String sPubMainStatus = "RUNNING";
+            String sRunID = (new java.rmi.server.UID()).toString();
+            initWS();
+            initRun( runPubMain, sPubMainStatus, sRunID );
+            log( "log-" + sProjectName + ": START - Main RunID is " + sRunID, 0, runPubMain );
+            // end initialize for RUN
+            // ***************************************
+            log( "log-" + sProjectName + ": initialize project variables", 0, runPubMain );
+            // Initialize variables
+            java.text.SimpleDateFormat dtFormat = new java.text.SimpleDateFormat( "yyyyMMdd" );
+            String sRunDate = dtFormat.format( new java.util.Date() );
+            com.dva.errors.DVAErrors dvaError = new DVAErrors();
+            DVAControl dvc = new DVAControl();
+            ErrorProperties ep = new ErrorProperties();
+            ep.setProjectName( sProjectName );
+            ep.setRootProjectName( sComponentName );
+            ep.setRunID( sRunID );
+            ep.setMessageID( "" );
+            boolean constLoop = true;
+            String sControlLock = "";
+            String sLockName = "lock_" + sProjectName + "_" + InetAddress.getLocalHost().getHostName().replaceAll( ".davita.com", "" );
+            String sInputdir = "";
+            int i = 0;
+            int iStandard = 0;
+            int iReqID = 2;
+            String sControlDate = "";
+            try {
+                // Get Lock
+                log( "log-" + sProjectName + ": checkEgateLock", 0, runPubMain );
+                sControlLock = getControlValue( sLockName, ep ).trim();
+                if (!sControlLock.equals( "N" )) {
+                    log( "log-" + sProjectName + ": checkEgateLock returned: " + sControlLock, 0, runPubMain );
+                    // ***************************************
+                    // post RUN record at failure point
+                    postRun( ep, sControlLock, runPubMain );
+                    return;
+                } else {
+                    setControlValue( sLockName, "Y", ep );
+                    log( "log-" + sProjectName + ": Lock set", 0, runPubMain );
+                    // get control date
+                    try {
+                        log( "log-" + sProjectName + ": Get Control Date", 0, runPubMain );
+                        sControlDate = getControlValue( sComponentName, ep ).trim();
+                        log( "log-" + sProjectName + ": Control Date: " + sControlDate, 0, runPubMain );
+                        try {
+                            // Reset control date to blank
+                            log( "log-" + sProjectName + ": Reset Control Date to Blank", 0, runPubMain );
+                            setControlValue( sComponentName, "", ep );
+                        } catch ( Exception e ) {
+                            log( "log-" + sProjectName + ": Reset of Control Date to Blank Failed", 0, runPubMain );
+                        }
+                    } catch ( Exception e ) {
+                        log( "log-" + sProjectName + ": Unable to Query for Control Date, Continuing to Process with Blank Control Date", 0, runPubMain );
+                        sControlDate = "";
+                    }
+                }
+                // Check for SendDataToRun value
+                checkSendDataToRun( ep, runPubMain );
+                // process standard records
+                log( "log-" + sProjectName + ": process standard records", 0, runPubMain );
+                iStandard = processRecords( sRunID, "STANDARD", PatientTransplant_PatientTransplant_1, otdREG_Transplant_SQL_1, JMS_1, ep, iReqID, sControlDate, sRunDate, runPubMain );
+                if (iStandard > 0) {
+                    log( "log-" + sProjectName + ": New records processed", 0, runPubMain );
+                    sPubMainStatus = "PUB_RECS_PROCESSED";
+                } else {
+                    log( "log-" + sProjectName + ": No new records processed", 0, runPubMain );
+                    sPubMainStatus = "NO_NEW_RECS";
+                }
+                // Reset variables
+                i = 0;
+                // Unlock control value
+                logger.info( "***Total Number of Records Received  :" + recordCountReceived );
+                logger.info( "***Total Number of Records Processed  :" + recordCountProcessed );
+                logger.info( "***Total Number of Records Processed after JMS Send :" + recordCountProcessedafterJMS );
+                log( "log-" + sProjectName + ": Clear lock", 0, runPubMain );
+                setControlValue( sLockName, "N", ep );
+                log( "log-" + sProjectName + ": Lock released", 0, runPubMain );
+                log( "log-" + sProjectName + ": COMPLETE - Main RunID is " + sRunID, 0, runPubMain );
+                // post run count at final state
+            } catch ( Exception e ) {
+                sPubMainStatus = "PUB_FAILED";
+                log( "log-" + sProjectName + ": +++EXCEPTION: " + e.getMessage(), 0, runPubMain );
+                ep.setSeverityType( "HIGH" );
+                if (ep.getErrorCode().equals( "" )) {
+                    // send input to file
+                    ep.setErrorCode( "Transplant_P_103" );
+                    ep.setErrorDescription( "Error in JCD " + e.getMessage() );
+                    ep.setTechErrorDescription( "Error Message :" + e.getMessage() );
+                }
+                setError( ep, runPubMain );
+                // set PUB_MAIN status for RUN
+                log( "log-" + sProjectName + ": Clear lock", 0, runPubMain );
+                // unlock process for next iteration
+            }
+            setRunCount( iStandard, ep, runPubMain );
+            postRun( ep, sPubMainStatus, runPubMain );
+        } catch ( Exception e ) {
+            ErrorProperties errp = new ErrorProperties();
+            errp.setProjectName( sProjectName );
+            errp.setRootProjectName( sComponentName );
+            errp.setSeverityType( "HIGH" );
+            errp.setErrorDescription( "Initialization error: " + "Project=" + sProjectName + " System=" + DVAConstants.repositoryName + " ComponentName=" + sComponentName );
+            errp.setErrorCode( "INIT" + sComponentName.toUpperCase() + sComponentVer + "00" );
+            errp.setTechErrorDescription( "Error Message: " + e.getMessage() );
+            setError( errp, new RUN() );
+        }
+    }
+
+    // start
+    public int processRecords( String sRunID, String strMode, xsd.PatientTransplant_898367981.PatientTransplant_ PatientTransplant_PatientTransplant_1, otdREG_Transplant_SQL.OtdREG_Transplant_SQLOTD otdREG_Transplant_SQL_1, com.stc.connectors.jms.JMS JMS_1, ErrorProperties ep, int iReqID, String sControlDate, String sRunDate, RUN runObj )
+        throws Exception
+    {
+        int i = 0;
+        String sReqID = "2";
+        RUN runPubMsg = null;
+        String sRecKey = "FAILURE";
+        String sMsgRunID = null;
+        com.stc.connectors.jms.Message msg = JMS_1.createTextMessage();
+        try {
+            otdREG_Transplant_SQL_1.getPub_Transplant().setDFRequestorID( STCTypeConverter.toIntegerPrimitive( sReqID ) );
+            if (sControlDate.equals( "" ) || sControlDate == null) {
+                otdREG_Transplant_SQL_1.getPub_Transplant().setDFRequestDate( null );
+            } else {
+                otdREG_Transplant_SQL_1.getPub_Transplant().setDFRequestDate( stringToTimestamp( sControlDate, ep ) );
+                log( "log-" + sProjectName + ":SSS +++Input Date  : " + sControlDate + "  FORMATED DATE " + stringToTimestamp( sControlDate, ep ), 0, runObj );
+            }
+            otdREG_Transplant_SQL_1.getPub_Transplant().execute();
+            otdREG_Transplant_SQL_1.commit();
+        } catch ( java.sql.SQLException sqlex ) {
+            ep.setSeverityType( "HIGH" );
+            ep.setErrorDescription( "SQL Server EXCEPTION+++" );
+            if (sqlex.getMessage().indexOf( "deadlock" ) == -1) {
+                ep.setErrorCode( "Transplant_P_111" );
+                log( "log-" + sProjectName + ": +++SQL Exception: " + sqlex.getMessage(), 0, runObj );
+                ep.setTechErrorDescription( ": +++SQL Exception: " + sqlex.getMessage() );
+                throw sqlex;
+            } else {
+                ep.setErrorCode( "Transplant_P_112" );
+                log( "log-" + sProjectName + ": SQL Server Deadlock Encountered... Will Re-Attempt Query on Next Schedule. ", 0, runObj );
+                ep.setTechErrorDescription( ": +++SQL Server Deadlock Encountered: " + sqlex.getMessage() );
+                throw sqlex;
+            }
+        }
+        if (otdREG_Transplant_SQL_1.getPub_Transplant().resultsAvailable()) {
+            while (otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().available()) {
+                while (otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().next()) {
+                    try {
+                        runPubMsg = new RUN( "PUB_MSG" );
+                        recordCountReceived = recordCountReceived + 1;
+                        // Set new message ID for each result in the set
+                        sMsgRunID = (new java.rmi.server.UID()).toString() + "-" + STCTypeConverter.toString( i + 1 );
+                        ep.setMessageID( sMsgRunID );
+                        String sDF_Monitor_ReggieID = otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getDFMonitorID();
+                        String sPatientID = otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getPatientID();
+                        sRecKey = sDF_Monitor_ReggieID + "|" + sPatientID;
+                        log( "log-RECORD KEY  : " + sRecKey, 0, runPubMsg );
+                        initRunMsg( runPubMsg, sRunID, sMsgRunID, sRecKey );
+                        // end initialize
+                        // ***************************************
+                        PatientTransplant_PatientTransplant_1.setDFMonitorID( sDF_Monitor_ReggieID );
+                        PatientTransplant_PatientTransplant_1.setPatientID( sPatientID );
+                        PatientTransplant_PatientTransplant_1.setPatientTransplantID( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getPatientTransplantID() );
+                        PatientTransplant_PatientTransplant_1.setTransplantDate( typeConverter.dateToString( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getTransplantDate(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+                        PatientTransplant_PatientTransplant_1.setTransplant_FailureDate( typeConverter.dateToString( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getTransplant_FailureDate(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+                        PatientTransplant_PatientTransplant_1.setReturn_To_DialysisDate( typeConverter.dateToString( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getReturn_To_DialysisDate(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+                        PatientTransplant_PatientTransplant_1.setReEntitlementDate( typeConverter.dateToString( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getReEntitlementDate(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+                        PatientTransplant_PatientTransplant_1.setIsTransplantInUSA( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getIsTransplantInUSA() );
+                        PatientTransplant_PatientTransplant_1.setComment( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getChangeComment() );
+                        PatientTransplant_PatientTransplant_1.setRecordStatus( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getRecordStatus() );
+                        PatientTransplant_PatientTransplant_1.setCreatedDate( typeConverter.dateToString( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getCreateDate(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+                        PatientTransplant_PatientTransplant_1.setModifiedDate( typeConverter.dateToString( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getModifiedDate(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+                        PatientTransplant_PatientTransplant_1.setCreatedByFirstName( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getCreatedByFirstName() );
+                        PatientTransplant_PatientTransplant_1.setCreatedByLastName( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getCreatedByLastName() );
+                        PatientTransplant_PatientTransplant_1.setModifiedByFirstName( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getModifiedByFirstName() );
+                        PatientTransplant_PatientTransplant_1.setModifiedByLastName( otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getModifiedByLastName() );
+                        recordCountProcessed = recordCountProcessed + 1;
+                    } catch ( Exception e ) {
+                        // ep.setErrorCode( sComponentName + sComponentVer + "02" );
+                        ep.setErrorCode( "Transplant_P_102" );
+                        ep.setErrorDescription( "Record Level Error: " + "PatientID = " + otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getPatientID() + " Project=" + sProjectName + " System=" + DVAConstants.repositoryName + " ComponentName=" + sComponentName );
+                        ep.setTechErrorDescription( "Error Message :" + e.getMessage() );
+                        ep.setSeverityType( "HIGH" );
+                        log( "log-" + sProjectName + ": +++Exception-record level exception: " + e.getMessage(), 0, runPubMsg );
+                        // add message data to RUN and postRun
+                        setError( ep, runPubMsg );
+                        postRunRecordLevel( ep, "PUB_REC_ERRORED", PatientTransplant_PatientTransplant_1.marshalToString(), runPubMsg );
+                        // reset in case another error occurs
+                        ep.reset();
+                    }
+                    // try catch Block
+                    try {
+                        // log( "log-" + sProjectName + ": create JMS", 0, runPubMsg );
+                        msg = JMS_1.createTextMessage( PatientTransplant_PatientTransplant_1.marshalToString() );
+                        msg.storeUserProperty( "RunDate", sRunDate );
+                        msg.storeUserProperty( "MsgRunId", sMsgRunID );
+                        msg.storeUserProperty( "RunId", sRunID );
+                        msg.storeUserProperty( "RecordKey", sRecKey );
+                        JMS_1.send( msg );
+                        i = i + 1;
+                        recordCountProcessedafterJMS = recordCountProcessedafterJMS + 1;
+                        // count the number of records
+                        // log( "log-" + sProjectName + ": Message sent to JMS", 0, runPubMsg );
+                        log( "log-" + sProjectName + ": Message sent to JMS" + PatientTransplant_PatientTransplant_1.marshalToString(), 0, runPubMsg );
+                        // post RUN
+                        postRunRecordLevel( ep, "PUB_REC_PROCESSED", PatientTransplant_PatientTransplant_1.marshalToString(), runPubMsg );
+                    } catch ( Exception e ) {
+                        ep.setErrorCode( "Transplant_P_113" );
+                        ep.setErrorDescription( "JMS Send Error: " + "PatientID = " + otdREG_Transplant_SQL_1.getPub_Transplant().get$Pub_TransplantResultSets0().getPatientID() + " Project=" + sProjectName + " System=" + DVAConstants.repositoryName + " ComponentName=" + sComponentName );
+                        ep.setTechErrorDescription( "Error Message :" + e.getMessage() );
+                        ep.setSeverityType( "HIGH" );
+                        log( "log-" + sProjectName + ": +++Exception-record level exception: " + e.getMessage(), 0, runPubMsg );
+                        // add message data to RUN and postRun
+                        setError( ep, runPubMsg );
+                        postRunRecordLevel( ep, "PUB_REC_ERRORED", PatientTransplant_PatientTransplant_1.marshalToString(), runPubMsg );
+                        // reset in case another error occurs
+                        ep.reset();
+                    }
+                    // reset outbound otd
+                    PatientTransplant_PatientTransplant_1.reset();
+                }
+                // while next
+            }
+            // while available
+        }
+        // if condition
+        return i;
+    }
+
+    // Process Records
+    public static String getCurrentStringDate()
+        throws Exception
+    {
+        DateFormat f = new SimpleDateFormat( "yyyy-MM-dd HH:mm:ss" );
+        return f.format( new java.util.Date() );
+    }
+
+    public void log( String sLog, int iLevel, RUN runObj )
+    {
+        if (iLevel == 0) {
+            logger.info( sLog );
+        } else if (iLevel == 1) {
+            logger.debug( sLog );
+        }
+        if (sLog.trim().length() == 0) {
+            return;
+        }
+        runObj.setLOG( sLog, typeConverter.dateToString( new java.util.Date(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+    }
+
+    public void setRunCount( int cRec, ErrorProperties ep, RUN runPubMain )
+        throws Exception
+    {
+        String sDesc = "setting run count to " + cRec;
+        try {
+            log( "log-" + sProjectName + ": " + sDesc + "...", 0, runPubMain );
+            runPubMain.getHEADER().setRECORD_COUNT( (new Integer( cRec )).toString() );
+            log( "log-" + sProjectName + ": " + sDesc + "-->success", 0, runPubMain );
+        } catch ( Exception e ) {
+            // ep.setErrorCode( sComponentName + sComponentVer + "05" );
+            ep.setErrorCode( "Transplant_P_105" );
+            ep.setErrorDescription( sDesc + " Failed" );
+            ep.setSeverityType( "HIGH" );
+            ep.setTechErrorDescription( sDesc + " Failed: " + e.getMessage() );
+            setError( ep, runPubMain );
+        }
+    }
+
+    public void postRun( ErrorProperties ep, String sPubMainStatus, RUN runObj )
+        throws Exception
+    {
+        try {
+            // log( "log-" + sProjectName + ": Before postRun, in postRun.  GET RECORDCOUNT is " + runObj.getHEADER().getRECORD_COUNT(), 0, runObj );
+            log( "log-" + sProjectName + ": posting RUN", 0, runObj );
+            runObj.getPROJECT().setSTATUS( sPubMainStatus );
+            runObj.getPROJECT().setTIMESTAMP( typeConverter.dateToString( new java.util.Date(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+            run_post_ws.invoke( runObj );
+            if (!run_post_ws.getResponse().equals( "COMPLETE" )) {
+                throw new Exception( run_post_ws.getResponse() );
+            }
+            log( "log-" + sProjectName + ": posting RUN complete", 0, runObj );
+        } catch ( Exception e ) {
+            log( "log-" + sProjectName + ": Failed to post RUN - Pub Main", 0, runObj );
+            // ep.setErrorCode( sComponentName.toUpperCase() + sComponentVer + "06" );
+            ep.setErrorCode( "Transplant_P_106" );
+            ep.setErrorDescription( "Failed to post RUN - Pub Main:" + e.getMessage() );
+            ep.setTechErrorDescription( e.getMessage() );
+            setError( ep, runObj );
+        }
+    }
+
+    public void postRunRecordLevel( ErrorProperties ep, String sStatus, String sOTDMsg, RUN runPubMsg )
+        throws Exception
+    {
+        try {
+            log( "log-" + sProjectName + ": posting RUN at record level", 0, runPubMsg );
+            if (sSendDataToRun.equals( "Y" ) || sStatus.equals( "PUB_REC_ERRORED" ) || sStatus.equals( "SUB_REC_FAILED" )) {
+                // add message data to RUN
+                runPubMsg.getDATA().setCLOB( sOTDMsg );
+            } else {
+                runPubMsg.getDATA().setCLOB( "" );
+            }
+            runPubMsg.getMESSAGE().setTIMESTAMP( typeConverter.dateToString( new java.util.Date(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+            runPubMsg.getPROJECT().setTIMESTAMP( typeConverter.dateToString( new java.util.Date(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+            runPubMsg.getPROJECT().setSTATUS( sStatus );
+            log( "log-" + sProjectName + ": invoke run_post_ws", 0, runPubMsg );
+            run_post_ws.invoke( runPubMsg );
+            if (!run_post_ws.getResponse().equals( "COMPLETE" )) {
+                throw new Exception( run_post_ws.getResponse() );
+            }
+            log( "log-" + sProjectName + ": run_post_ws complete", 0, runPubMsg );
+        } catch ( Exception e ) {
+            log( "log-" + sProjectName + ": Failed to post RUN Record Level", 0, runPubMsg );
+            // ep.setErrorCode( sComponentName.toUpperCase() + sComponentVer + "08"
+            ep.setErrorCode( "Transplant_P_108" );
+            ep.setErrorDescription( "Failed to post RUN - RecordLevel RecKey[" + runPubMsg.getMESSAGE().getRECORD_KEY() + "Exception:" + e.getMessage() );
+            ep.setTechErrorDescription( e.getMessage() );
+            setError( ep, runPubMsg );
+        }
+    }
+
+    public void checkSendDataToRun( ErrorProperties ep, RUN runObj )
+        throws Exception
+    {
+        Date dtNow = new java.util.Date();
+        try {
+            log( "log-" + sProjectName + ": check if retrieve SendDataRun", 0, runObj );
+            // 900000 millis = 15 minutes
+            if (dtLastChecked == null || dtNow.getTime() - dtLastChecked.getTime() > 900000) {
+                sSendDataToRun = getControlValue( sSendDataRunName, ep ).trim();
+                dtLastChecked = dtNow;
+                log( "log-" + sProjectName + ": retrieved new SendDataRun=" + sSendDataToRun, 0, runObj );
+            }
+        } catch ( Exception e ) {
+            log( "log-" + sProjectName + ": Failed to obtain SendDataToRun value", 0, runObj );
+            ep.setErrorCode( sComponentName.toUpperCase() + sComponentVer + "05" );
+            ep.setTechErrorDescription( "SendDataToRun exception:" + e.getMessage() );
+            ep.setErrorDescription( "SendDataToRun failed for " + " Project=" + sProjectName + " ComponentName=" + sComponentName + " SendDataRunName=" + sSendDataRunName );
+            setError( ep, runObj );
+        }
+    }
+
+    public void initRun( RUN runObj, String sStatus, String sRunID )
+    {
+        try {
+            thisIp = InetAddress.getLocalHost();
+            hostName = thisIp.getHostName();
+            hostAddress = thisIp.getHostAddress();
+        } catch ( Exception e ) {
+            hostName = "UNKNOWN";
+            hostAddress = "UNKNOWN";
+        }
+        runObj.getHEADER().setTYPE( "PUB_MAIN" );
+        runObj.getHEADER().setRUN_ID( sRunID );
+        runObj.getPROJECT().setNAME( sProjectName );
+        runObj.getPROJECT().setDOMAIN( sDomain );
+        runObj.getPROJECT().setTOPIC( sTopic );
+        runObj.getPROJECT().setSTATUS( sStatus );
+        runObj.getPROJECT().setTIMESTAMP( typeConverter.dateToString( new java.util.Date(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+        runObj.getPROJECT().setHOST( hostName );
+        runObj.getPROJECT().setIP_ADDRESS( hostAddress );
+        runObj.getDATA().setCLOB( "" );
+        // create a dummy log
+        runObj.setLOG( "", typeConverter.dateToString( new java.util.Date(), "yyyy-MM-dd HH:mm:ss", false, "" ) );
+        // post intial RUN PUB_MAIN record
+        int[] i = { 0 };
+        try {
+            postRun( new ErrorProperties(), sStatus, runObj );
+        } catch ( Exception e ) {
+            ;
+        }
+    }
+
+    public void initRunMsg( RUN runObj, String sRunID, String sMsgRunID, String sRecordKey )
+    {
+        runObj.getHEADER().setTYPE( "PUB_MSG" );
+        runObj.getHEADER().setRUN_ID( sRunID );
+        runObj.getMESSAGE().setMESSAGE_RUN_ID( sMsgRunID );
+        runObj.getMESSAGE().setRECORD_KEY( sRecordKey );
+        runObj.getPROJECT().setNAME( sProjectName );
+        runObj.getPROJECT().setHOST( hostName );
+        runObj.getPROJECT().setIP_ADDRESS( hostAddress );
+        runObj.getPROJECT().setDOMAIN( sDomain );
+        runObj.getPROJECT().setTOPIC( sTopic );
+    }
+
+    public void initWS()
+        throws Exception
+    {
+        try {
+            if (control_ws == null) {
+                control_ws = new Control_WS();
+            }
+            if (run_post_ws == null) {
+                run_post_ws = new Run_Post_WS();
+            }
+            if (error_ws == null) {
+                error_ws = new Error_WS();
+            }
+            if (reprocesspub_ws == null) {
+                error_ws = new Error_WS();
+            }
+        } catch ( Exception e ) {
+            throw e;
+        }
+    }
+
+    public void setControlValue( String sControlName, String sValue, ErrorProperties ep )
+        throws Exception
+    {
+        String sControlValue = "";
+        try {
+            com.davita.www.CONTROL c = new com.davita.www.CONTROL();
+            c.setMODE( "SET" );
+            c.setCONTROL_NAME( sControlName );
+            c.setCONTROL_VALUE( sValue );
+            control_ws.invoke( c );
+            sControlValue = control_ws.getResponse();
+        } catch ( Exception e ) {
+            if (!ep.getErrorCode().equals( sComponentName.toUpperCase() + sComponentVer + "09" )) {
+                ep.setErrorCode( sComponentName.toUpperCase() + sComponentVer + "09" );
+                ep.setErrorCode( "Transplant_P_109" );
+            }
+            ep.setErrorDescription( "egate setControl Value failed Project=" + sComponentName + " System=" + DVAConstants.repositoryName + " ComponentName=" + ep.getProjectName() );
+            ep.setSeverityType( "HIGH" );
+            ep.setTechErrorDescription( "egate setControlValue exception:" + e.getMessage() );
+            throw new Exception( "CONTROLVALUEEXCEPTION" );
+        }
+    }
+
+    public String getControlValue( String sControlName, ErrorProperties ep )
+        throws Exception
+    {
+        String sControlValue = "";
+        try {
+            com.davita.www.CONTROL ctrl = new com.davita.www.CONTROL();
+            ctrl.setMODE( "GET" );
+            ctrl.setCONTROL_NAME( sControlName );
+            ctrl.setCONTROL_VALUE( "" );
+            control_ws.invoke( ctrl );
+            sControlValue = control_ws.getResponse();
+            if (sControlValue != null) {
+                sControlValue = sControlValue;
+            } else {
+                ep.setErrorCode( sComponentName.toUpperCase() + sComponentVer + "10" );
+            }
+        } catch ( Exception e ) {
+            logger.info( "e: " + e.getMessage() );
+            if (!ep.getErrorCode().equals( sComponentName.toUpperCase() + sComponentVer + "10" )) {
+                ep.setErrorCode( sComponentName.toUpperCase() + sComponentVer + "10" );
+                ep.setErrorCode( "Transplant_P_110" );
+            }
+            ep.setErrorDescription( "egate getControl Value failed for " + sControlName + " Project=" + sComponentName + " System=" + DVAConstants.repositoryName + " ComponentName=" + ep.getProjectName() );
+            ep.setSeverityType( "HIGH" );
+            ep.setTechErrorDescription( "egate getControlValue exception:" + e.getMessage() );
+            throw new Exception( "CONTROLVALUEEXCEPTION" );
+        }
+        return sControlValue;
+    }
+
+    public java.sql.Timestamp stringToTimestamp( String str, ErrorProperties ep )
+        throws Exception
+    {
+        try {
+            if (str == null || str.equals( "" )) {
+                return null;
+            }
+            SimpleDateFormat formatter = new SimpleDateFormat( "yyyy-MM-dd HH:mm:ss" );
+            ParsePosition pos = new ParsePosition( 0 );
+            java.util.Date dt = formatter.parse( str, pos );
+            return new java.sql.Timestamp( dt.getTime() );
+        } catch ( Exception e ) {
+            ep.setErrorCode( "Transplant_P_114" );
+            ep.setErrorDescription( "stringToTimestamp failed: Project=" + sProjectName + " System=" + DVAConstants.repositoryName + " ComponentName=" + sComponentName );
+            ep.setSeverityType( "MEDIUM" );
+            throw new Exception( e.getMessage() );
+        }
+    }
+
+    public void setError( ErrorProperties ep, RUN runObj )
+        throws Exception
+    {
+        // set Error values
+        try {
+            ERROR err = new ERROR();
+            String sErrorStatus = "";
+            log( "log-" + sProjectName + ": ErrorCode:" + ep.getErrorCode(), 0, runObj );
+            log( "log-" + sProjectName + ":  Projectname:" + ep.getProjectName(), 0, runObj );
+            err.setERROR_CODE( ep.getErrorCode() );
+            err.setERROR_DESCRIPTION( ep.getErrorDescription() );
+            err.setPROJECT_NAME( ep.getProjectName() );
+            err.setROOT_PROJECT_NAME( sComponentName );
+            err.setTECH_ERROR_DESCRIPTION( ep.getTechErrorDescription() );
+            err.setMSG_RUN_ID( ep.getMessageID() );
+            err.setRUN_ID( ep.getRunID() );
+            err.setERROR_TIME( getCurrentStringDate() );
+            log( "log-" + sProjectName + ": invoking Error_WS", 0, runObj );
+            error_ws.invoke( err );
+            sErrorStatus = error_ws.getResponse();
+            log( "log-" + sProjectName + ": Return Status from Error_WS:" + sErrorStatus, 0, runObj );
+            if (!sErrorStatus.equals( "COMPLETE" )) {
+                throw new Exception( sErrorStatus );
+            }
+        } catch ( Exception e ) {
+            log( "log-" + sProjectName + ": SetError failed:" + e.getMessage(), 0, runObj );
+            // Post Original Error as seperate Error code
+            DVAErrors.postError( ep );
+            ep.setErrorCode( "Transplant_P_107" );
+            ep.setErrorDescription( "SetError failed:" + e.getMessage() );
+            DVAErrors.postError( ep );
+        }
+    }
+
+}
